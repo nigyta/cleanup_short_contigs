@@ -144,7 +144,7 @@ if [ "$PROK_FLAG" == "true" ]; then
     echo ========== Removing short contigs derived from bacterial contamination ==========
     echo THIS STEP MAY TAKE TIME
     export SINGULARITY_BIND=/home/ddbjshare/blast/db/v5/
-    python ${SCRIPTDIR}/remove_foreign_contigs.py -q tmp.genome.fa -d /home/ddbjshare/blast/db/v5/ref_prok_rep_genomes --num_threads $NUM_THREADS --prefix prok
+    python ${SCRIPTDIR}/remove_foreign_contigs.py -q tmp.genome.fa -d /home/ddbjshare/blast/db/v5/ref_prok_rep_genomes --num_threads $NUM_THREADS --prefix prok --use_singularity
     mv tmp.genome.prok_filtered.fa tmp.genome.fa
 fi
 

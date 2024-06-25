@@ -11,3 +11,8 @@ Optionally, it can remove contigs derived from bacterial contamination (with `-p
 ```
 cleanup_short_contigs [-n num_threads] [-c cp.fasta] [-m mt.fasta] [-p] <query> <outdir>
 ```
+
+## settings
+- Query coverage for BLAST hit: 75%  
+- Proportion of rDNA regions within the sequence: 50%  
+The sequences exceeding these value will be removed.  

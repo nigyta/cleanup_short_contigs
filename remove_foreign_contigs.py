@@ -16,7 +16,9 @@ def parse_arg():
     subject_db_group.add_argument('--db', '-d', help='Database')
     parser.add_argument('--evalue', type=float, default=1e-10, help='E-value threshold')
     parser.add_argument('--prefix', default=None, help='Output file prefix')
-    parser.add_argument('--cov_cutoff', type=int, default=75, help='Qcov threshold (default=90)')
+    parser.add_argument('--cov_cutoff', type=int, default=75, help='Qcov threshold (default=75)')
+    parser.add_argument('--perc_identity', type=float, default=90, help='Percent identity (default=90)')
+    parser.add_argument('--max_target_seqs', type=int, default=500, help='Maximum number of alignments (default=500)')
     parser.add_argument('--num_threads', '-n', type=int, default=1, help='Number of threads')
     parser.add_argument('--use_singularity', action='store_true', help='Use Singularity container')
     args = parser.parse_args()
@@ -26,7 +28,7 @@ def parse_arg():
 
     return args
 
-def run_blastn(query, prefix, subject, db, evalue, num_threads, use_singularity):
+def run_blastn(query, prefix, subject, db, evalue, perc_identity, max_target_seqs, num_threads, use_singularity):
 
     # Construct the BLAST command
     outfmt = f'7 {blast_header}'
@@ -34,9 +36,10 @@ def run_blastn(query, prefix, subject, db, evalue, num_threads, use_singularity)
         'blastn',
         '-query', query,
         '-evalue', str(evalue),
+        '-perc_identity', str(perc_identity),
+        '-max_target_seqs', str(max_target_seqs),
         '-outfmt', outfmt,
         '-out', f"{prefix}_blast.tab",
-        '-task', 'blastn',
         '-num_threads', str(num_threads)
     ]
 
@@ -65,16 +68,22 @@ def parse_blast_result(prefix, cov_cutoff):
             cols = line.strip().split('\t')
             qaccver = cols[qaccver_idx]
             qcovs = float(cols[qcovs_idx])
-            if qaccver in result:
-                continue
-            result[qaccver] = qcovs
+            qcovs_current = result.get(qaccver, 0)
+            if qcovs > qcovs_current:
+                result[qaccver] = qcovs
+
     out_file_hit_id = f"{prefix}_hit_id.txt"
-    print(f"Coverage > {cov_cutoff}% will be removed")
-    print(f"Query\tCoverage")
+    out_file_result = f"{prefix}_result.tsv"
+
     num_to_be_removed = 0
-    with open(out_file_hit_id, 'w') as f:
+    with open(out_file_hit_id, 'w') as f, open(out_file_result, 'w') as f_result:
+        print(f"Coverage > {cov_cutoff}% will be removed")
+        print(f"Query\tTarget\tCoverage\tstatus")
+        f_result.write(f"Query\tTarget\tCoverage\tstatus\n")
         for k, v in result.items():
-            print(f"{k}\t{v}")
+            status = "REMOVE" if v > cov_cutoff else "KEEP"
+            print(f"{k}\t{prefix}\t{v}\t{status}")
+            f_result.write(f"{k}\t{prefix}\t{v}\t{status}\n")
             if v > cov_cutoff:
                 num_to_be_removed += 1
                 f.write(k + '\n')
@@ -85,19 +94,19 @@ def remove_unwanted_sequences(query, prefix, use_singularity):
     out_file_basename, extention = os.path.splitext(os.path.basename(query))
     out_file_filtered = f"{out_file_basename}.{prefix}_filtered{extention}"
     seqkit_cmd = [
-        'seqkit', 'grep', '-v', '-n', '-f', out_file_hit_id, query, '-o', out_file_filtered
+        'seqkit', 'grep', '-v', '-n', '-r', '-f', out_file_hit_id, query, '-o', out_file_filtered
     ]
     if use_singularity:
         seqkit_cmd = ['singularity', 'exec', seqkit_sif] + seqkit_cmd
-    print(f"Running BLAST with command: {' '.join(seqkit_cmd)}")
+    print(f"Running seqkit grep with command: {' '.join(seqkit_cmd)}")
     subprocess.run(seqkit_cmd)
     print(f"Output file is written to {out_file_filtered}")
 
 if __name__ == "__main__":
     args = parse_arg()
     query, prefix, subject, db, evalue, num_threads = args.query, args.prefix, args.subject, args.db, args.evalue, args.num_threads
-    cov_cutoff, use_singularity = args.cov_cutoff, args.use_singularity
-    run_blastn(query, prefix, subject, db, evalue, num_threads, use_singularity)
+    cov_cutoff, use_singularity, perc_identity, max_target_seqs = args.cov_cutoff, args.use_singularity, args.perc_identity, args.max_target_seqs
+    run_blastn(query, prefix, subject, db, evalue, perc_identity, max_target_seqs, num_threads, use_singularity)
     num_to_be_removed = parse_blast_result(prefix, cov_cutoff)
     if num_to_be_removed > 0:
         remove_unwanted_sequences(query, prefix, use_singularity)

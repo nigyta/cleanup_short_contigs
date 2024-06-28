@@ -26,7 +26,7 @@ def parse_arg():
     parser.add_argument('--query', '-q', required=True, help='Query sequence file')
     parser.add_argument('--evalue', type=float, default=1e-10, help='E-value threshold')
     parser.add_argument('--prefix', default="rDNA", help='Output file prefix')
-    parser.add_argument('--rdna_cov_cutoff', type=int, default=50, help='rDNA coverage threshold (default=50)')
+    parser.add_argument('--rdna_cov_cutoff', type=int, default=45, help='rDNA coverage threshold (default=50)')
     parser.add_argument('--num_threads', '-n', type=int, default=1, help='Number of threads')
     parser.add_argument('--use_singularity', action='store_true', help='Use Singularity container')
     args = parser.parse_args()
@@ -81,17 +81,21 @@ def parse_barrnap_gff(query, prefix, rdna_cov_cutoff):
 
 
     out_file_hit_id = f"{prefix}_hit_id.txt"
-    print(f"Coverage > {rdna_cov_cutoff}% will be removed")
-    print(f"Query\tLength\trDNA_length\tCoverage")
-    num_to_be_removed = 0
-    with open(out_file_hit_id, 'w') as f:
+    out_file_result = f"{prefix}_result.tsv"
 
+    num_to_be_removed = 0
+    with open(out_file_hit_id, 'w') as f, open(out_file_result, 'w') as f_result:
+        print(f"Coverage > {rdna_cov_cutoff}% will be removed")
+        print(f"Query\tTarget\tCoverage\tstatus\trDNA_length/contig_length")
+        f_result.write(f"Query\tTarget\tCoverage\tstatus\trDNA_length/contig_length\n")
         for result in results.values():
             result.hits.merge_overlaps()
             rdna_length = sum([interval.length() for interval in result.hits])
-            rdna_coverage = rdna_length / result.length
-            print(f"{result.query}\t{result.length}\t{rdna_length}\t{rdna_coverage}")
-            if rdna_coverage * 100 > rdna_cov_cutoff:
+            rdna_coverage = rdna_length / result.length * 100
+            status = "REMOVE" if rdna_coverage > rdna_cov_cutoff else "KEEP"
+            print(f"{result.query}\t{prefix}\t{rdna_coverage:.2f}\t{status}\t{rdna_length}/{result.length}")
+            f_result.write(f"{result.query}\t{prefix}\t{rdna_coverage:.2f}\t{status}\t{rdna_length}/{result.length}\n")
+            if rdna_coverage > rdna_cov_cutoff:
                 num_to_be_removed += 1
                 f.write(result.query + '\n')
     return num_to_be_removed
@@ -101,11 +105,11 @@ def remove_unwanted_sequences(query, prefix, use_singularity):
     out_file_basename, extention = os.path.splitext(os.path.basename(query))
     out_file_filtered = f"{out_file_basename}.{prefix}_filtered{extention}"
     seqkit_cmd = [
-        'seqkit', 'grep', '-v', '-n', '-f', out_file_hit_id, query, '-o', out_file_filtered
+        'seqkit', 'grep', '-v', '-n', '-r', '-f', out_file_hit_id, query, '-o', out_file_filtered
     ]
     if use_singularity:
         seqkit_cmd = ['singularity', 'exec', seqkit_sif] + seqkit_cmd
-    print(f"Running BLAST with command: {' '.join(seqkit_cmd)}")
+    print(f"Running seqkit grep with command: {' '.join(seqkit_cmd)}")
     subprocess.run(seqkit_cmd)
     print(f"Output file is written to {out_file_filtered}")
 

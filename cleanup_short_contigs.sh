@@ -4,13 +4,14 @@
 NUM_THREADS=1
 CPFASTA=""
 MTFASTA=""
+RDNA_FLAG=false
 PROK_FLAG=false
-
+SELFBLAST_FLAG=false
 SCRIPTDIR=$(cd $(dirname $0) && pwd)
 
 
 # オプションの解析
-while getopts "n:c:m:p" opt; do
+while getopts "n:c:m:rps" opt; do
   case $opt in
     n)
       NUM_THREADS="$OPTARG"
@@ -21,8 +22,14 @@ while getopts "n:c:m:p" opt; do
     m)
       MTFASTA="$OPTARG"
       ;;
+    r)
+      RDNA_FLAG=true
+      ;;
     p)
       PROK_FLAG=true
+      ;;
+    s)
+      SELFBLAST_FLAG=true
       ;;
     \?)
       echo "Invalid option: -$OPTARG" >&2
@@ -41,7 +48,7 @@ shift $((OPTIND -1))
 # 引数のチェック
 if [ "$#" -ne 2 ]; then
     echo
-    echo "Usage: $0 [-n num_threads] [-c cp.fasta] [-m mt.fasta] [-p] <query> <outdir>"
+    echo "Usage: $0 [-n num_threads] [-c cp.fasta] [-m mt.fasta] [-r] [-p] [-s] <query> <outdir>"
     echo 
     exit 1
 fi
@@ -56,7 +63,9 @@ OUTDIR=$2
 # CPFASTA=$3
 # MTFASTA=$4
 
-
+echo
+echo ========== CLEANUP SHORT CONTIGS ==========
+echo "--- SETTINGS ---"
 # クエリとして与えられたパスにファイルが存在するか確認
 if [ ! -f "$QUERY" ]; then
     echo "Error: The file specified by query ($QUERY) does not exist."
@@ -64,10 +73,9 @@ if [ ! -f "$QUERY" ]; then
 else
     QUERY_FULLPATH=$(cd $(dirname $QUERY) && pwd)/$(basename $QUERY)
     echo INPUT QUERY FASTA: $QUERY_FULLPATH
-
 fi
 
-if [ -n "$CPFASTA" ] &&　[ ! -f "$CPFASTA" ]; then
+if [ -n "$CPFASTA" ] && [ ! -f "$CPFASTA" ]; then
     echo "Error: The file specified by query ($CPFASTA) does not exist."
     exit 1
 else
@@ -77,13 +85,13 @@ else
     fi
 fi
 
-if [ -n "$MTFASTA" ] &&　[ ! -f "$MTFASTA" ]; then
+if [ -n "$MTFASTA" ] && [ ! -f "$MTFASTA" ]; then
     echo "Error: The file specified by query ($MTFASTA) does not exist."
     exit 1
 else
     if [ -n "$MTFASTA" ]; then
         MTFASTA_FULLPATH=$(cd $(dirname $MTFASTA) && pwd)/$(basename $MTFASTA)
-        echo Reference FASTA for mitochondorion: $MTFASTA_FULLPATH
+        echo Reference FASTA for mitochondrion: $MTFASTA_FULLPATH
     fi
 fi
 
@@ -95,9 +103,13 @@ mkdir -p "$OUTDIR"
 OUTDIR_FULLPATH=$(cd $OUTDIR && pwd)
 
 
+echo Enable BLAST against RefSeq_representative_prokaryotes to remove bacterial contamination: $PROK_FLAG
+echo Enable removal of short contigs derived from rDNA cluster region: $RDNA_FLAG
+echo Enable removal of redundant contigs mapped to longer sequences by self-BLAST : $SELFBLAST_FLAG
 echo Number of threads: $NUM_THREADS
-echo Enable BLAST against RefSeq_representative_prokaryotes: $PROK_FLAG
-
+echo OutputDir: $OUTDIR_FULLPATH
+echo 
+echo ========== Process Start! ==========
 
 # ファイル名（拡張子付き）を取得
 QUERY_BASENAME=$(basename "$QUERY")
@@ -126,27 +138,47 @@ cp genome_lt1M.fa tmp.genome.fa
 if [ ! -z "$CPFASTA" ]; then
     echo ========== Removing short contigs derived from chloroplast ========== 
     python ${SCRIPTDIR}/remove_foreign_contigs.py -q tmp.genome.fa -s ${CPFASTA_FULLPATH} --use_singularity --prefix cp 
-    mv tmp.genome.cp_filtered.fa tmp.genome.fa
+    if [ -e tmp.genome.cp_filtered.fa ]; then
+        mv tmp.genome.cp_filtered.fa tmp.genome.fa
+    fi
 fi
 
 if [ ! -z "$MTFASTA" ]; then
     echo ========== Removing short contigs derived from mitochondorion ==========
     python ${SCRIPTDIR}/remove_foreign_contigs.py -q tmp.genome.fa -s ${MTFASTA_FULLPATH} --use_singularity --prefix mt 
-    mv tmp.genome.mt_filtered.fa tmp.genome.fa
+    if [ -e tmp.genome.mt_filtered.fa ]; then
+        mv tmp.genome.mt_filtered.fa tmp.genome.fa
+    fi
 fi
 
-echo ========== Removing short contigs derived from rDNA cluster region ==========
-python ${SCRIPTDIR}/remove_rDNA_contigs.py --query tmp.genome.fa --use_singularity --num_threads $NUM_THREADS --prefix rDNA
-mv tmp.genome.rDNA_filtered.fa tmp.genome.fa
-
+if [ "$RDNA_FLAG" == "true" ]; then
+    echo ========== Removing short contigs derived from rDNA cluster region ==========
+    python ${SCRIPTDIR}/remove_rDNA_contigs.py --query tmp.genome.fa --use_singularity --num_threads $NUM_THREADS --prefix rDNA
+    if [ -e tmp.genome.rDNA_filtered.fa ]; then
+        mv tmp.genome.rDNA_filtered.fa tmp.genome.fa
+    fi
+fi
 
 if [ "$PROK_FLAG" == "true" ]; then
     echo ========== Removing short contigs derived from bacterial contamination ==========
     echo THIS STEP MAY TAKE TIME
     export SINGULARITY_BIND=/home/ddbjshare/blast/db/v5/
     python ${SCRIPTDIR}/remove_foreign_contigs.py -q tmp.genome.fa -d /home/ddbjshare/blast/db/v5/ref_prok_rep_genomes --num_threads $NUM_THREADS --prefix prok --use_singularity
-    mv tmp.genome.prok_filtered.fa tmp.genome.fa
+    if [ -e tmp.genome.prok_filtered.fa ]; then
+        mv tmp.genome.prok_filtered.fa tmp.genome.fa
+    fi
 fi
+
+
+if [ "$SELFBLAST_FLAG" == "true" ]; then
+    echo ========== Removing redundant contigs mapped to longer sequences by self-BLAST ==========
+    echo THIS STEP MAY TAKE TIME
+    python ${SCRIPTDIR}/remove_redundant_contigs.py -q tmp.genome.fa -s genome_1M.fa --num_threads $NUM_THREADS --prefix self --use_singularity
+    if [ -e tmp.genome.self_filtered.fa ]; then
+        mv tmp.genome.self_filtered.fa tmp.genome.fa
+    fi
+fi
+
 
 
 mv tmp.genome.fa genome_lt1M.clean.fa

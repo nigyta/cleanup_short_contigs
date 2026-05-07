@@ -129,7 +129,7 @@ cd $OUTDIR
 
 # 1M以上とそれ未満に分ける
 $SEQKIT_SIF seqkit seq -M 999999 $QUERY_FULLPATH > genome_lt1M.fa
-$SEQKIT_SIF seqkit seq -m 10000000 $QUERY_FULLPATH > genome_1M.fa
+$SEQKIT_SIF seqkit seq -m 1000000 $QUERY_FULLPATH > genome_1M.fa
 
 
 cp genome_lt1M.fa tmp.genome.fa
